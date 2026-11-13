@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import { useFrame, useThree } from '@react-three/fiber';
 import { BOOK, DETAIL_CARD } from '@/lib/constants';
+import { settle } from '@/lib/activity';
 
 const { W, H, D } = BOOK;
 
@@ -19,13 +20,20 @@ const FRAMES = {
 const INTRO_START = new THREE.Vector3(2.6, -7.4, 3.8);
 const INTRO_LOOK = new THREE.Vector3(0.2, 0.4, 0);
 
-function frameFor(name, camera, size) {
+function frameFor(name, camera, size, out = { pos: new THREE.Vector3(), look: new THREE.Vector3() }) {
   const f = FRAMES[name] || FRAMES.closed;
   const aspect = size.width / size.height;
   const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   const dist = Math.max(f.h / 2 / tanHalf, f.w / 2 / (tanHalf * aspect));
-  return { ...f, dist, pos: new THREE.Vector3(f.x, f.y, f.z + dist), look: new THREE.Vector3(f.x, f.y, f.z) };
+  out.dist = dist;
+  out.lambda = f.lambda;
+  out.pos.set(f.x, f.y, f.z + dist);
+  out.look.set(f.x, f.y, f.z);
+  return out;
 }
+
+// reused every frame (no per-frame allocations)
+const scratch = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
 
 /**
  * Cinematic moves for the intro and the opening (GSAP along spline paths), and
@@ -127,18 +135,26 @@ export default function CameraRig({ framing, phase }) {
       return;
     }
     cam.up.set(0, 1, 0);
-    const f = frameFor(framing, cam, state.size);
+    const f = frameFor(framing, cam, state.size, scratch);
     const parallax = f.dist * (framing === 'read' ? 0.012 : 0.018);
     const { x: px, y: py } = state.pointer;
     const damp = THREE.MathUtils.damp;
     const step = Math.min(dt, 0.05);
-    cam.position.x = damp(cam.position.x, f.pos.x + px * parallax * 1.3, f.lambda, step);
-    cam.position.y = damp(cam.position.y, f.pos.y + py * parallax, f.lambda, step);
+    const tx = f.pos.x + px * parallax * 1.3;
+    const ty = f.pos.y + py * parallax;
+    cam.position.x = damp(cam.position.x, tx, f.lambda, step);
+    cam.position.y = damp(cam.position.y, ty, f.lambda, step);
     cam.position.z = damp(cam.position.z, f.pos.z, f.lambda, step);
     r.look.x = damp(r.look.x, f.look.x, f.lambda, step);
     r.look.y = damp(r.look.y, f.look.y, f.lambda, step);
     r.look.z = damp(r.look.z, f.look.z, f.lambda, step);
     cam.lookAt(r.look);
+    // render-on-demand: keep drawing until the camera has come to rest
+    settle(cam.position.x, tx, 2e-3);
+    settle(cam.position.y, ty, 2e-3);
+    settle(cam.position.z, f.pos.z, 2e-3);
+    settle(r.look.x, f.look.x, 2e-3);
+    settle(r.look.y, f.look.y, 2e-3);
   });
 
   return null;

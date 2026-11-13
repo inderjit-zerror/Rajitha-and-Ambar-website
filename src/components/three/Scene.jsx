@@ -4,11 +4,13 @@ import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { useFrame } from '@react-three/fiber';
-import { Environment, Lightformer } from '@react-three/drei';
 import { BOOK, PALETTE } from '@/lib/constants';
+import { settle } from '@/lib/activity';
+import { PRESETS } from '@/lib/quality';
 import Book from './Book';
 import CameraRig from './CameraRig';
 import Dust from './Dust';
+import { AdaptiveResolution, ContextGuard, FrameDriver, ShadowCache, StudioEnvironment, Warmup } from './Performance';
 
 /** A warm light that glides across the cover so the foil and seal glint. */
 function SweepLight({ trigger, phase }) {
@@ -36,22 +38,27 @@ function SweepLight({ trigger, phase }) {
 /** Darkens everything below the lifted invitation card while reading. */
 function ReadDimmer({ active, onClose }) {
   const ref = useRef();
-  useFrame((_, dt) => {
+  useFrame((_, delta) => {
     const m = ref.current?.material;
     if (!m) return;
-    m.opacity = THREE.MathUtils.damp(m.opacity, active ? 0.42 : 0, 6, dt);
+    const target = active ? 0.42 : 0;
+    m.opacity = THREE.MathUtils.damp(m.opacity, target, 6, Math.min(delta, 0.05));
     ref.current.visible = m.opacity > 0.002;
+    settle(m.opacity, target, 2e-3);
   });
   return (
     <mesh
       ref={ref}
       position={[0, 0, 0.26]}
       visible={false}
-      onClick={(e) => {
-        if (!active) return;
-        e.stopPropagation();
-        onClose?.();
-      }}
+      onClick={
+        active
+          ? (e) => {
+              e.stopPropagation();
+              onClose?.();
+            }
+          : undefined
+      }
     >
       <planeGeometry args={[80, 80]} />
       <meshBasicMaterial color="#1b2233" transparent opacity={0} depthWrite={false} />
@@ -59,7 +66,28 @@ function ReadDimmer({ active, onClose }) {
   );
 }
 
-export default function Scene({ assets, events, phase, selected, framing, reading, compact, sweep, onSelect, onRequestOpen, onIntroDone, onOpened, onToggleRead, onHoverBook }) {
+export default function Scene({
+  assets,
+  events,
+  phase,
+  selected,
+  framing,
+  reading,
+  sweep,
+  quality = PRESETS.medium,
+  onWarm,
+  onFail,
+  onSelect,
+  onRequestOpen,
+  onIntroDone,
+  onOpened,
+  onToggleRead,
+  onHoverBook,
+}) {
+  // continuous frames only while something always moves (idle hover, dust);
+  // otherwise frames are drawn on demand
+  const continuous = phase === 'intro' || phase === 'ready' || quality.dust > 0;
+
   return (
     <>
       <color attach="background" args={[PALETTE.table]} />
@@ -72,26 +100,19 @@ export default function Scene({ assets, events, phase, selected, framing, readin
         position={[-4.5, 6, 9]}
         intensity={2.4}
         color="#fff4e4"
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[quality.shadowMap, quality.shadowMap]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.02}
-        shadow-radius={6}
-        shadow-camera-left={-9}
-        shadow-camera-right={9}
-        shadow-camera-top={9}
-        shadow-camera-bottom={-9}
-        shadow-camera-near={1}
-        shadow-camera-far={30}
+        shadow-radius={quality.shadowRadius}
+        shadow-camera-left={-6.5}
+        shadow-camera-right={6.5}
+        shadow-camera-top={6.5}
+        shadow-camera-bottom={-6.5}
+        shadow-camera-near={4}
+        shadow-camera-far={22}
       />
-      <SweepLight trigger={sweep} phase={phase} />
-
-      {/* Image-based light for foil, wax and satin reflections (built locally) */}
-      <Environment resolution={256} environmentIntensity={0.6}>
-        <Lightformer form="rect" intensity={2.4} position={[0, 1.5, 9]} scale={[14, 7, 1]} target={[0, 0, 0]} />
-        <Lightformer form="rect" intensity={2} position={[-9, 5, 4]} scale={[8, 5, 1]} target={[0, 0, 0]} />
-        <Lightformer form="rect" intensity={1.2} position={[9, -3, 4]} scale={[6, 4, 1]} target={[0, 0, 0]} />
-        <Lightformer form="circle" intensity={5} position={[-4, 7, 7]} scale={2.5} target={[0, 0, 0]} />
-      </Environment>
+      {quality.sweepLight && <SweepLight trigger={sweep} phase={phase} />}
+      <StudioEnvironment intensity={0.6} />
 
       {/* The table the book rests on */}
       <mesh position={[0, 0, -BOOK.T - 0.002]} receiveShadow>
@@ -99,7 +120,7 @@ export default function Scene({ assets, events, phase, selected, framing, readin
         <meshStandardMaterial color={PALETTE.table} roughness={1} metalness={0} />
       </mesh>
 
-      <Dust count={compact ? 70 : 140} />
+      {quality.dust > 0 && <Dust count={quality.dust} />}
 
       <Book
         assets={assets}
@@ -107,6 +128,7 @@ export default function Scene({ assets, events, phase, selected, framing, readin
         phase={phase}
         selected={selected}
         reading={reading}
+        quality={quality}
         onSelect={onSelect}
         onRequestOpen={onRequestOpen}
         onIntroDone={onIntroDone}
@@ -117,6 +139,12 @@ export default function Scene({ assets, events, phase, selected, framing, readin
       <ReadDimmer active={reading} onClose={onToggleRead} />
 
       <CameraRig framing={framing} phase={phase} />
+
+      <FrameDriver continuous={continuous} activeFps={quality.activeFps} idleFps={quality.idleFps} />
+      <ContextGuard onGiveUp={onFail} />
+      <ShadowCache />
+      <AdaptiveResolution min={quality.dpr[0]} max={quality.dpr[1]} />
+      <Warmup textures={assets.textures} onReady={onWarm} />
     </>
   );
 }

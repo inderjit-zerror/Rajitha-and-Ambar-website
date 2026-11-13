@@ -1,5 +1,5 @@
-import ClientApp from '@/components/ClientApp';
+import Experience from '@/components/Experience';
 
 export default function Home() {
-  return <ClientApp />;
+  return <Experience />;
 }

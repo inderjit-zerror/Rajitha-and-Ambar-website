@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useCursor } from '@react-three/drei';
+import { useCursor } from '@/lib/useCursor';
 import { createInvitationCard } from '@/lib/invitationCard';
 
 /** Left page: the two-sided invitation card (flip + themed colours + SDF text). */

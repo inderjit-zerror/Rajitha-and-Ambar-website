@@ -5,19 +5,22 @@ import * as THREE from 'three';
 import { BOOK, DETAIL_CARD, PALETTE, computeCardLayout } from './constants';
 import { createCanvas, loadImage } from './paint/utils';
 import { paintLinenTile } from './paint/linen';
-import { paintCover, paintSpine, paintBackCover } from './paint/cover';
+import { paintCover, paintSpine } from './paint/cover';
 import { paintEventCard, paintPocket } from './paint/cards';
 import { paintPaperGrain, paintFrame, paintLotus, paintDivider, paintTabFrame } from './paint/detail';
 import { paintSeal, paintSatin } from './paint/seal';
 import { layoutInvitation, collectCharacters } from './layout';
 import { preloadSdfFonts } from './fonts';
+import { PRESETS } from './quality';
 
 const DEFAULT_THEME = { paper: PALETTE.paper, ink: PALETTE.ink, soft: PALETTE.inkSoft, accent: '#a8843f' };
+
+let anisotropy = 8;
 
 function toTexture(source, { srgb = true, repeat, mipmaps = true } = {}) {
   const t = source instanceof HTMLImageElement ? new THREE.Texture(source) : new THREE.CanvasTexture(source);
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
+  t.anisotropy = anisotropy;
   if (!mipmaps) {
     t.generateMipmaps = false;
     t.minFilter = THREE.LinearFilter;
@@ -109,8 +112,9 @@ function paintRing(size = 256) {
 // let the browser paint (so the loader can show progress) between heavy steps
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 
-export async function buildAssets({ couple, events, header, family, compact, onProgress = () => {} }) {
-  const ppu = compact ? 360 : 512;
+export async function buildAssets({ couple, events, header, family, quality = PRESETS.medium, onProgress = () => {} }) {
+  const { ppu } = quality;
+  anisotropy = quality.anisotropy;
   const layout = computeCardLayout(events.length);
   const report = async (p) => {
     onProgress(p);
@@ -130,10 +134,9 @@ export async function buildAssets({ couple, events, header, family, compact, onP
   linenSpine.repeat.set(BOOK.D + BOOK.T * 2, BOOK.H);
   await report(0.18);
 
-  const cover = surfaceTextures(paintCover({ ppu, family, couple, linenTile }));
+  const cover = surfaceTextures(await paintCover({ ppu, family, couple, linenTile }));
   await report(0.36);
-  const spine = surfaceTextures(paintSpine({ ppu, family, couple, linenTile }));
-  const back = surfaceTextures(paintBackCover({ ppu, family, couple, linenTile }));
+  const spine = surfaceTextures(await paintSpine({ ppu, family, couple, linenTile }));
   await report(0.46);
 
   const cards = [];
@@ -144,12 +147,12 @@ export async function buildAssets({ couple, events, header, family, compact, onP
   const pocket = toTexture(paintPocket({ ppu, layout }));
   await report(0.76);
 
-  const seal = paintSeal({ family, monogram: couple.monogram, size: compact ? 384 : 512 });
+  const seal = paintSeal({ family, monogram: couple.monogram, size: ppu >= 450 ? 512 : 384 });
   const satin = toTexture(paintSatin(), { repeat: [1, 1] });
 
   const invitation = {
-    paper: toTexture(paintPaperGrain(compact ? 512 : 1024)),
-    frame: toTexture(paintFrame(DETAIL_CARD.W, DETAIL_CARD.H, compact ? 360 : 512)),
+    paper: toTexture(paintPaperGrain(quality.paper)),
+    frame: toTexture(paintFrame(DETAIL_CARD.W, DETAIL_CARD.H, ppu)),
     emblem: emblemImage ? toTexture(emblemImage) : toTexture(paintLotus()),
     emblemIsImage: Boolean(emblemImage),
     emblemAspect: emblemImage ? emblemImage.width / emblemImage.height : 1,
@@ -180,7 +183,6 @@ export async function buildAssets({ couple, events, header, family, compact, onP
     linenSpine,
     ...Object.values(cover),
     ...Object.values(spine),
-    ...Object.values(back),
     ...cards,
     pocket,
     satin,
@@ -198,12 +200,12 @@ export async function buildAssets({ couple, events, header, family, compact, onP
     linenSpine,
     cover,
     spine,
-    back,
     cards,
     pocket,
     satin,
     invitation,
     ...extras,
+    textures: all, // for uploading to the GPU ahead of the first frame
     dispose: () => all.forEach((t) => t.dispose()),
   };
 }

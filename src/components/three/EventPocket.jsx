@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { useCursor } from '@react-three/drei';
 import gsap from 'gsap';
+import { useCursor } from '@/lib/useCursor';
+import { settle } from '@/lib/activity';
 
 const _normal = new THREE.Vector3();
 const _point = new THREE.Vector3();
+const noRaycast = () => null;
 
 /**
  * Right page: the illustrated pocket holding one card per event.
@@ -19,6 +21,7 @@ export default function EventPocket({ assets, events, selected, onSelect, intera
   const groupRef = useRef();
   const shadowRef = useRef();
   const cardRefs = useRef([]);
+  const frameRefs = useRef([]);
   const lifts = useRef([]);
   const pulses = useRef([]);
   const reveal = useRef([]);
@@ -129,13 +132,18 @@ export default function EventPocket({ assets, events, selected, onSelect, intera
     return () => tween.kill();
   }, [revealed, layout]);
 
-  useFrame((_, dt) => {
+  useFrame((_, delta) => {
     const group = groupRef.current;
     if (!group) return;
-    group.updateWorldMatrix(true, false);
-    _normal.set(0, 1, 0).transformDirection(group.matrixWorld);
-    _point.set(0, layout.pocket.bottom, 0).applyMatrix4(group.matrixWorld);
-    resources.clipPlane.setFromNormalAndCoplanarPoint(_normal, _point);
+    const dt = Math.min(delta, 0.05); // frames can be far apart when rendering on demand
+    const damp = THREE.MathUtils.damp;
+    // the clip plane only matters while cards are (partly) inside the pocket
+    if (reveal.current.some((t) => t.value !== 1)) {
+      group.updateWorldMatrix(true, false);
+      _normal.set(0, 1, 0).transformDirection(group.matrixWorld);
+      _point.set(0, layout.pocket.bottom, 0).applyMatrix4(group.matrixWorld);
+      resources.clipPlane.setFromNormalAndCoplanarPoint(_normal, _point);
+    }
 
     layout.cards.forEach((card, i) => {
       const mesh = cardRefs.current[i];
@@ -143,17 +151,20 @@ export default function EventPocket({ assets, events, selected, onSelect, intera
       const isSelected = i === selected;
       const isHovered = interactive && i === hovered;
       const target = (isSelected ? 0.1 : 0) + (isHovered ? 0.06 : 0);
-      lifts.current[i] = THREE.MathUtils.damp(lifts.current[i] ?? 0, target, 9, dt);
-      pulses.current[i] = THREE.MathUtils.damp(pulses.current[i] ?? 0, 0, 5, dt);
+      lifts.current[i] = damp(lifts.current[i] ?? 0, target, 9, dt);
+      pulses.current[i] = damp(pulses.current[i] ?? 0, 0, 5, dt);
+      settle(lifts.current[i], target);
+      settle(pulses.current[i], 0, 1e-3);
       const r = reveal.current[i]?.value ?? 0;
       const pulse = Math.sin(Math.min(1, pulses.current[i]) * Math.PI) * 0.08;
       mesh.position.y = card.centerY + card.hiddenOffset * (1 - r) + (lifts.current[i] + pulse) * r;
       mesh.position.z = card.z + pulses.current[i] * 0.01;
       // gold hairline frame on the selected (and hovered) tab
-      const frame = mesh.children.find((c) => c.userData.tabFrame);
+      const frame = frameRefs.current[i];
       if (frame) {
         const o = (isSelected ? 0.95 : isHovered ? 0.45 : 0) * r;
-        frame.material.opacity = THREE.MathUtils.damp(frame.material.opacity, o, 8, dt);
+        frame.material.opacity = damp(frame.material.opacity, o, 8, dt);
+        settle(frame.material.opacity, o, 2e-3);
       }
     });
     // the stack's shadow only exists once the cards are out of the pocket
@@ -167,7 +178,7 @@ export default function EventPocket({ assets, events, selected, onSelect, intera
   return (
     <group ref={groupRef}>
       {/* soft shadow of the whole stack on the board */}
-      <mesh ref={shadowRef} position={[0.03, layout.pocket.bottom + stackH / 2 - 0.04, 0.0015]} material={resources.shadowMaterial}>
+      <mesh ref={shadowRef} position={[0.03, layout.pocket.bottom + stackH / 2 - 0.04, 0.0015]} material={resources.shadowMaterial} raycast={noRaycast}>
         <planeGeometry args={[layout.cardW * 1.45, stackH * 1.3]} />
       </mesh>
 
@@ -192,16 +203,18 @@ export default function EventPocket({ assets, events, selected, onSelect, intera
           }}
         >
           <mesh
+            ref={(el) => (frameRefs.current[i] = el)}
             geometry={resources.tabFrameGeometry}
             material={resources.tabFrameMaterials[i]}
             position={[0, layout.cardH / 2 - Math.min(layout.band, 0.6) / 2, 0.0008]}
-            userData={{ tabFrame: true }}
+            raycast={noRaycast}
           />
           {i > 0 && (
             <mesh
               geometry={resources.edgeGeometry}
               material={resources.edgeMaterial}
               position={[0, layout.cardH / 2 + 0.028, -0.003]}
+              raycast={noRaycast}
             />
           )}
         </mesh>
@@ -219,6 +232,7 @@ export default function EventPocket({ assets, events, selected, onSelect, intera
               -0.0025,
             ]}
             rotation={[0, 0, edge.angle]}
+            raycast={noRaycast}
           />
         ))}
         <mesh

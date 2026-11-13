@@ -9,6 +9,7 @@ import gsap from 'gsap';
 import { Text } from 'troika-three-text';
 import { DETAIL_CARD } from './constants';
 import { sdfFont } from './fonts';
+import { settle } from './activity';
 
 const W = DETAIL_CARD.W;
 const H = DETAIL_CARD.H;
@@ -144,6 +145,7 @@ export function createInvitationCard(assets) {
 
   // staggered "write in": each line fades and rises into place
   const applyReveal = (face) => {
+    face.applied = face.reveal.v;
     const n = face.ordered.length;
     const wave = face.reveal.v * (n + 5);
     face.ordered.forEach((obj, i) => {
@@ -231,13 +233,21 @@ export function createInvitationCard(assets) {
     },
 
     update(dt, pointer) {
-      faces.forEach(applyReveal);
+      faces.forEach((face) => {
+        if (face.applied !== face.reveal.v) applyReveal(face);
+      });
       const damp = THREE.MathUtils.damp;
       const step = Math.min(dt, 0.05);
-      s.lift = damp(s.lift, (s.reading ? 0.42 : 0) + (s.hover ? 0.05 : 0), 5, step);
+      const liftTarget = (s.reading ? 0.42 : 0) + (s.hover ? 0.05 : 0);
       const tiltOn = s.reading || s.hover ? 1 : 0;
-      s.tiltX = damp(s.tiltX, -pointer.y * 0.06 * tiltOn, 4, step);
-      s.tiltY = damp(s.tiltY, pointer.x * 0.08 * tiltOn * (s.reading ? 1 : 0.4), 4, step);
+      const tiltXTarget = -pointer.y * 0.06 * tiltOn;
+      const tiltYTarget = pointer.x * 0.08 * tiltOn * (s.reading ? 1 : 0.4);
+      s.lift = damp(s.lift, liftTarget, 5, step);
+      s.tiltX = damp(s.tiltX, tiltXTarget, 4, step);
+      s.tiltY = damp(s.tiltY, tiltYTarget, 4, step);
+      settle(s.lift, liftTarget);
+      settle(s.tiltX, tiltXTarget);
+      settle(s.tiltY, tiltYTarget);
 
       const p = s.flip.p;
       const arc = Math.sin(Math.PI * p);

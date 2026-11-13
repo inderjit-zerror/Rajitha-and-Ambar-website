@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { useCursor } from '@react-three/drei';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { BOOK } from '@/lib/constants';
 import { createBoardGeometry, createSealHalves, createRibbonGeometry, createStripPlane } from '@/lib/geometry';
 import { seeded } from '@/lib/paint/utils';
+import { useCursor } from '@/lib/useCursor';
+import { settle } from '@/lib/activity';
+import { PRESETS } from '@/lib/quality';
 import InvitationCard from './InvitationCard';
 import EventPocket from './EventPocket';
 import Sparkles from './Sparkles';
@@ -40,7 +42,7 @@ const smoothstep = (a, b, x) => {
  *
  * open = 0 → closed (spine upright, cover on top), open = 1 → flat spread.
  */
-export default function Book({ assets, events, phase, selected, reading, onSelect, onRequestOpen, onIntroDone, onOpened, onToggleRead, onHoverBook }) {
+export default function Book({ assets, events, phase, selected, reading, quality = PRESETS.medium, onSelect, onRequestOpen, onIntroDone, onOpened, onToggleRead, onHoverBook }) {
   const bookRef = useRef();
   const floatRef = useRef();
   const spineRef = useRef();
@@ -108,30 +110,29 @@ export default function Book({ assets, events, phase, selected, reading, onSelec
     const linenSpine = cloth(assets.linenSpine);
     const cover = foil(assets.cover);
     const spine = foil(assets.spine);
-    const back = foil(assets.back);
     const gutter = new THREE.MeshBasicMaterial({ map: assets.gutter, transparent: true, depthWrite: false });
+    // satin sheen and wax clear-coat are costlier shaders: standard on low-end
+    const Rich = quality.physical ? THREE.MeshPhysicalMaterial : THREE.MeshStandardMaterial;
+    const richExtras = (extra) => (quality.physical ? extra : {});
     const satin = (color) =>
-      new THREE.MeshPhysicalMaterial({
+      new Rich({
         map: assets.satin,
         color,
         roughness: 0.36,
         metalness: 0.05,
-        sheen: 1,
-        sheenRoughness: 0.3,
-        sheenColor: new THREE.Color('#ffffff'),
+        ...richExtras({ sheen: 1, sheenRoughness: 0.3, sheenColor: new THREE.Color('#ffffff') }),
         side: THREE.DoubleSide,
         transparent: true,
       });
     const ribbon = satin('#efe4cc');
     const bookmark = satin('#c9a865');
-    const seal = new THREE.MeshPhysicalMaterial({
+    const seal = new Rich({
       map: assets.sealColor,
       bumpMap: assets.sealBump,
       bumpScale: 5,
       roughness: 0.42,
       metalness: 0.3,
-      clearcoat: 0.8,
-      clearcoatRoughness: 0.22,
+      ...richExtras({ clearcoat: 0.8, clearcoatRoughness: 0.22 }),
       emissive: new THREE.Color('#ffbd55'),
       emissiveIntensity: 0,
       transparent: true,
@@ -149,9 +150,9 @@ export default function Book({ assets, events, phase, selected, reading, onSelec
     const sealShadow = new THREE.MeshBasicMaterial({ map: assets.roundShadow, transparent: true, depthWrite: false, opacity: 0.55 });
     // ExtrudeGeometry groups: 0 = outer face (-z), 1 = edges, 2 = inner face (+z)
     const materials = {
-      all: [linen, linenSpine, cover, spine, back, gutter, ribbon, bookmark, seal, sealShadow, shock],
+      all: [linen, linenSpine, cover, spine, gutter, ribbon, bookmark, seal, sealShadow, shock],
       cover: [cover, linen, linen],
-      back: [back, linen, linen],
+      back: [linen, linen, linen],
       spine: [spine, linenSpine, linenSpine],
       gutter,
       ribbon,
@@ -161,7 +162,7 @@ export default function Book({ assets, events, phase, selected, reading, onSelec
       shock,
     };
     return { geometries, materials };
-  }, [assets]);
+  }, [assets, quality.physical]);
 
   useEffect(
     () => () => {
@@ -248,6 +249,12 @@ export default function Book({ assets, events, phase, selected, reading, onSelec
     const coverAngle = (1 - p) * Math.PI;
     spineRef.current.rotation.y = spineAngle;
     coverRef.current.rotation.y = coverAngle - spineAngle;
+
+    // keep frames coming until the hover/float damping has come to rest
+    settle(m.hover, hovered && isReady ? 1 : 0, 1e-3);
+    settle(g.position.z, m.hover * 0.12);
+    settle(g.rotation.x, 0, f > 0 ? -1 : 1e-4);
+    settle(g.rotation.y, 0, f > 0 ? -1 : 1e-4);
   });
 
   const isOpen = phase === 'open';
@@ -256,20 +263,27 @@ export default function Book({ assets, events, phase, selected, reading, onSelec
     <group ref={bookRef}>
       <group
         ref={floatRef}
-        onClick={(e) => {
-          if (!isReady) return;
-          e.stopPropagation();
-          onRequestOpen?.();
-        }}
-        onPointerOver={() => {
-          setHovered(true);
-          if (isReady) onHoverBook?.();
-        }}
-        onPointerOut={() => setHovered(false)}
+        onClick={
+          isReady
+            ? (e) => {
+                e.stopPropagation();
+                onRequestOpen?.();
+              }
+            : undefined
+        }
+        onPointerOver={
+          isReady
+            ? () => {
+                setHovered(true);
+                onHoverBook?.();
+              }
+            : undefined
+        }
+        onPointerOut={isReady ? () => setHovered(false) : undefined}
       >
         {/* back board */}
         <mesh geometry={geometries.board} material={materials.back} castShadow receiveShadow />
-        <mesh geometry={geometries.bookmark} material={materials.bookmark} castShadow receiveShadow />
+        <mesh geometry={geometries.bookmark} material={materials.bookmark} castShadow receiveShadow raycast={noRaycast} />
         <EventPocket
           assets={assets}
           events={events}
@@ -297,8 +311,8 @@ export default function Book({ assets, events, phase, selected, reading, onSelec
             position={[-W / 2 - T - 0.008, RIBBON_Y, D / 2]}
             rotation={[0, -Math.PI / 2, 0]}
           />
-          <mesh geometry={geometries.ribbonFront} material={materials.ribbon} position={[0, RIBBON_Y, -T - 0.003]} rotation={[0, Math.PI, 0]} />
-          <mesh geometry={geometries.sealShadow} material={materials.sealShadow} position={[SEAL_X + 0.04, RIBBON_Y - 0.05, D + T + 0.005]} />
+          <mesh geometry={geometries.ribbonFront} material={materials.ribbon} position={[0, RIBBON_Y, -T - 0.003]} rotation={[0, Math.PI, 0]} raycast={noRaycast} />
+          <mesh geometry={geometries.sealShadow} material={materials.sealShadow} position={[SEAL_X + 0.04, RIBBON_Y - 0.05, D + T + 0.005]} raycast={noRaycast} />
           <group ref={sealRef} position={[SEAL_X, RIBBON_Y, D + T + 0.006 + SEAL_R * 0.09]}>
             <mesh geometry={geometries.sealLeft} material={materials.seal} castShadow />
             <mesh geometry={geometries.sealRight} material={materials.seal} castShadow />
@@ -316,7 +330,7 @@ export default function Book({ assets, events, phase, selected, reading, onSelec
         <Sparkles
           trigger={sealBurst}
           position={[SEAL_X, RIBBON_Y, D + T + 0.06]}
-          count={190}
+          count={Math.round(190 * quality.sparkles)}
           spread={[0.3, 0.3, 0.05]}
           direction={[0, 0, 1]}
           cone={1.25}
@@ -332,7 +346,7 @@ export default function Book({ assets, events, phase, selected, reading, onSelec
         <Sparkles
           trigger={dustBurst}
           position={[-W / 2, 0, 0.12]}
-          count={300}
+          count={Math.round(300 * quality.sparkles)}
           spread={[0.6, 3.6, 0.05]}
           direction={[0, 0.1, 1]}
           cone={0.6}
@@ -351,7 +365,7 @@ export default function Book({ assets, events, phase, selected, reading, onSelec
         <group ref={spineRef} position={[-W / 2, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
           <mesh geometry={geometries.spine} material={materials.spine} position={[-D / 2, 0, -0.003]} castShadow receiveShadow />
           {/* soft crease shading along both hinges, visible when the book lies open */}
-          <mesh geometry={geometries.gutter} material={materials.gutter} position={[-D / 2, 0, 0.0012]} />
+          <mesh geometry={geometries.gutter} material={materials.gutter} position={[-D / 2, 0, 0.0012]} raycast={noRaycast} />
           {/* front cover, hinged on the spine's far edge */}
           <group ref={coverRef} position={[-D, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
             <mesh geometry={geometries.board} material={materials.cover} position={[-W / 2, 0, 0]} castShadow receiveShadow />

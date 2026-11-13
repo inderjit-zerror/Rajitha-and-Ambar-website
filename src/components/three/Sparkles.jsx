@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { seeded } from '@/lib/paint/utils';
+import { keepAlive } from '@/lib/activity';
 
 const vertexShader = /* glsl */ `
 uniform float uTime;
@@ -158,7 +159,10 @@ export default function Sparkles({
     u.uTime.value = t;
     u.uPixelRatio.value = state.viewport.dpr;
     points.visible = t > -1 && t < emit + life[1] + 0.2;
+    if (points.visible) keepAlive();
   });
 
-  return <points ref={pointsRef} geometry={geometry} material={material} frustumCulled={false} visible={false} {...props} />;
+  // starts visible (zero-sized) so its shader is compiled during warm-up;
+  // the frame loop hides it until a burst is triggered
+  return <points ref={pointsRef} geometry={geometry} material={material} frustumCulled={false} {...props} />;
 }

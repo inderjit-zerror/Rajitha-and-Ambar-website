@@ -11,7 +11,8 @@ export function paintLinenTile(size, base, seed = 7) {
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, size, size);
 
-  const threads = 180;
+  // ~180 threads per unit at full quality; fewer on smaller tiles (same look, less work)
+  const threads = Math.max(90, Math.round(size / 2.85));
   const step = size / threads;
 
   // over / under weave

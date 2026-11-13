@@ -1,11 +1,23 @@
-// Front cover, spine and back cover: blue book-cloth with white-foil embossing.
+// Front cover and spine: blue book-cloth with white-foil embossing.
 // Each surface produces three maps: colour, bump (emboss height) and an
 // ORM-style map (G = roughness, B = metalness) so the foil catches the light.
+// The bump and ORM maps only carry soft detail, so they are painted at half
+// resolution (a quarter of the memory and upload time).
 import { BOOK, PALETTE } from '../constants';
 import { createCanvas, seeded, fillSpaced } from './utils';
 import { fillWithLinen, boardEdgeShade } from './linen';
 
-function foilSurface(w, h, linenTile, ppu, drawArt) {
+const DETAIL_SCALE = 0.5;
+const pause = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
+/** A canvas at `scale` of (w, h) whose drawing coordinates stay in full-size pixels. */
+function scaledCanvas(w, h, scale) {
+  const c = createCanvas(w * scale, h * scale);
+  c.ctx.scale(scale, scale);
+  return c;
+}
+
+async function foilSurface(w, h, linenTile, ppu, drawArt) {
   const s = ppu / 512;
 
   const color = createCanvas(w, h);
@@ -14,16 +26,18 @@ function foilSurface(w, h, linenTile, ppu, drawArt) {
   drawArt(color.ctx, { color: 'rgba(28,46,80,0.38)', dx: 1.8 * s, dy: 2.4 * s, blur: 1.6 * s });
   drawArt(color.ctx, { color: 'rgba(255,255,255,0.45)', dx: -1.1 * s, dy: -1.1 * s, blur: 0.8 * s });
   drawArt(color.ctx, { color: PALETTE.foil });
+  await pause();
 
-  const bump = createCanvas(w, h);
+  const bump = scaledCanvas(w, h, DETAIL_SCALE);
   bump.ctx.fillStyle = '#6f6f6f';
   bump.ctx.fillRect(0, 0, w, h);
   bump.ctx.globalAlpha = 0.75;
   fillWithLinen(bump.ctx, linenTile, w, h);
   bump.ctx.globalAlpha = 1;
-  drawArt(bump.ctx, { color: '#ffffff', blur: 1.4 * s });
+  drawArt(bump.ctx, { color: '#ffffff', blur: 1.4 * s * DETAIL_SCALE });
+  await pause();
 
-  const orm = createCanvas(w, h);
+  const orm = scaledCanvas(w, h, DETAIL_SCALE);
   orm.ctx.fillStyle = 'rgb(0,236,0)';
   orm.ctx.fillRect(0, 0, w, h);
   drawArt(orm.ctx, { color: 'rgb(0,96,165)' });
@@ -237,16 +251,6 @@ export function paintSpine({ ppu, family, couple, linenTile }) {
       ctx.restore();
       ctx.fillRect(w * 0.18, h * 0.04, w * 0.64, Math.max(1, w * 0.012));
       ctx.fillRect(w * 0.18, h * 0.96, w * 0.64, Math.max(1, w * 0.012));
-    });
-  return foilSurface(w, h, linenTile, ppu, art);
-}
-
-export function paintBackCover({ ppu, family, couple, linenTile }) {
-  const w = BOOK.W * ppu;
-  const h = BOOK.H * ppu;
-  const art = (ctx, style) =>
-    withStyle(ctx, style, () => {
-      drawMonogram(ctx, w / 2, h * 0.86, h * 0.05, family, couple.monogram);
     });
   return foilSurface(w, h, linenTile, ppu, art);
 }

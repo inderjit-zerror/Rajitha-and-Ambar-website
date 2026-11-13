@@ -19,7 +19,7 @@ const Arrow = ({ dir }) => (
 );
 
 /** Everything drawn on top of the 3D canvas (DOM). */
-export default function Overlay({ ui, couple, events, phase, compact, selected, reading, progress, assetsReady, onReveal, onOpen, onSelect, onStep, onToggleRead, onCloseRead, onHoverOpen }) {
+export default function Overlay({ ui, couple, events, phase, flat = false, compact, selected, reading, progress, assetsReady, onReveal, onOpen, onSelect, onStep, onToggleRead, onCloseRead, onHoverOpen }) {
   const ctaRef = useRef(null);
   const isOpen = phase === 'open';
   const showChrome = phase !== 'loading';
@@ -65,98 +65,103 @@ export default function Overlay({ ui, couple, events, phase, compact, selected, 
 
       <Loader couple={couple} ui={ui} progress={progress} ready={assetsReady} onReveal={onReveal} />
 
-      <header className={`brand ${showChrome ? 'is-visible' : ''} ${reading ? 'is-reading' : ''}`}>
-        <span className="brand__mark">
-          {couple.monogram.first}
-          <i>&amp;</i>
-          {couple.monogram.second}
-        </span>
-        <span className="brand__meta">{couple.location}</span>
-      </header>
+      {/* the plain HTML invitation (no WebGL) brings its own navigation */}
+      {!flat && (
+        <>
+          <header className={`brand ${showChrome ? 'is-visible' : ''} ${reading ? 'is-reading' : ''}`}>
+            <span className="brand__mark">
+              {couple.monogram.first}
+              <i>&amp;</i>
+              {couple.monogram.second}
+            </span>
+            <span className="brand__meta">{couple.location}</span>
+          </header>
 
-      <div ref={ctaRef} className="cta" style={{ visibility: 'hidden', opacity: 0 }}>
-        <p className="cta__line">{ui.invitedLine}</p>
-        <button
-          type="button"
-          className="cta__btn"
-          onClick={onOpen}
-          onMouseEnter={onHoverOpen}
-          disabled={phase !== 'ready'}
-          aria-label={ui.openButton}
-        >
-          <span className="cta__seal" aria-hidden="true">
-            {couple.monogram.first}
-            <i>&amp;</i>
-            {couple.monogram.second}
-          </span>
-          <span className="cta__label" aria-hidden="true">
-            {[...ui.openButton].map((c, i) => (
-              <span key={i} className="cta__char">
-                {c === ' ' ? ' ' : c}
-              </span>
-            ))}
-          </span>
-        </button>
-      </div>
-
-      {/* event navigation, synced with the 3D cards */}
-      <nav className={`events-nav ${isOpen && !reading ? 'is-visible' : ''}`} aria-label="Wedding events">
-        <p className="events-nav__hint">{compact ? ui.hintMobile : ui.hint}</p>
-        <div className="events-nav__list">
-          {events.map((event, i) => (
+          <div ref={ctaRef} className="cta" style={{ visibility: 'hidden', opacity: 0 }}>
+            <p className="cta__line">{ui.invitedLine}</p>
             <button
-              key={event.id}
               type="button"
-              className={`events-nav__item ${selected === i ? 'is-active' : ''}`}
-              aria-pressed={selected === i}
-              onClick={() => onSelect(i)}
-              tabIndex={isOpen && !reading ? 0 : -1}
+              className="cta__btn"
+              onClick={onOpen}
+              onMouseEnter={onHoverOpen}
+              disabled={phase !== 'ready'}
+              aria-label={ui.openButton}
             >
-              <span className="events-nav__swatch" style={{ background: event.theme?.paper, borderColor: event.theme?.accent }} />
-              {event.title}
+              <span className="cta__seal" aria-hidden="true">
+                {couple.monogram.first}
+                <i>&amp;</i>
+                {couple.monogram.second}
+              </span>
+              <span className="cta__label" aria-hidden="true">
+                {[...ui.openButton].map((c, i) => (
+                  <span key={i} className="cta__char">
+                    {c === ' ' ? ' ' : c}
+                  </span>
+                ))}
+              </span>
             </button>
-          ))}
-          {!compact && (
-            <button type="button" className="events-nav__read" onClick={onToggleRead} tabIndex={isOpen && !reading ? 0 : -1}>
-              Read
-            </button>
-          )}
-        </div>
-      </nav>
+          </div>
 
-      {/* reading mode controls */}
-      <div className={`reader ${reading ? 'is-visible' : ''}`}>
-        <button type="button" className="reader__close" onClick={onCloseRead} tabIndex={reading ? 0 : -1}>
-          <span aria-hidden="true">✕</span> {ui.close}
-        </button>
-        <button type="button" className="reader__arrow reader__arrow--prev" onClick={() => onStep(-1)} aria-label={ui.previous} tabIndex={reading ? 0 : -1}>
-          <Arrow dir="left" />
-        </button>
-        <button type="button" className="reader__arrow reader__arrow--next" onClick={() => onStep(1)} aria-label={ui.next} tabIndex={reading ? 0 : -1}>
-          <Arrow dir="right" />
-        </button>
-        <div className="reader__caption">
-          <span className="reader__count">
-            {pad(selected + 1)} <i>/</i> {pad(events.length)}
-          </span>
-          <span className="reader__title">{current?.title}</span>
-          {!compact && <span className="reader__hint">{ui.readHint}</span>}
-        </div>
-      </div>
-
-      {/* screen-reader copy of the invitation */}
-      <section className="sr-only" aria-live="polite">
-        {isOpen && current && (
-          <>
-            <h2>{current.title}</h2>
-            {Object.values(current.detail || {})
-              .filter(Boolean)
-              .map((line) => (
-                <p key={line}>{line}</p>
+          {/* event navigation, synced with the 3D cards */}
+          <nav className={`events-nav ${isOpen && !reading ? 'is-visible' : ''}`} aria-label="Wedding events">
+            <p className="events-nav__hint">{compact ? ui.hintMobile : ui.hint}</p>
+            <div className="events-nav__list">
+              {events.map((event, i) => (
+                <button
+                  key={event.id}
+                  type="button"
+                  className={`events-nav__item ${selected === i ? 'is-active' : ''}`}
+                  aria-pressed={selected === i}
+                  onClick={() => onSelect(i)}
+                  tabIndex={isOpen && !reading ? 0 : -1}
+                >
+                  <span className="events-nav__swatch" style={{ background: event.theme?.paper, borderColor: event.theme?.accent }} />
+                  {event.title}
+                </button>
               ))}
-          </>
-        )}
-      </section>
+              {!compact && (
+                <button type="button" className="events-nav__read" onClick={onToggleRead} tabIndex={isOpen && !reading ? 0 : -1}>
+                  Read
+                </button>
+              )}
+            </div>
+          </nav>
+
+          {/* reading mode controls */}
+          <div className={`reader ${reading ? 'is-visible' : ''}`}>
+            <button type="button" className="reader__close" onClick={onCloseRead} tabIndex={reading ? 0 : -1}>
+              <span aria-hidden="true">✕</span> {ui.close}
+            </button>
+            <button type="button" className="reader__arrow reader__arrow--prev" onClick={() => onStep(-1)} aria-label={ui.previous} tabIndex={reading ? 0 : -1}>
+              <Arrow dir="left" />
+            </button>
+            <button type="button" className="reader__arrow reader__arrow--next" onClick={() => onStep(1)} aria-label={ui.next} tabIndex={reading ? 0 : -1}>
+              <Arrow dir="right" />
+            </button>
+            <div className="reader__caption">
+              <span className="reader__count">
+                {pad(selected + 1)} <i>/</i> {pad(events.length)}
+              </span>
+              <span className="reader__title">{current?.title}</span>
+              {!compact && <span className="reader__hint">{ui.readHint}</span>}
+            </div>
+          </div>
+
+          {/* screen-reader copy of the invitation */}
+          <section className="sr-only" aria-live="polite">
+            {isOpen && current && (
+              <>
+                <h2>{current.title}</h2>
+                {Object.values(current.detail || {})
+                  .filter(Boolean)
+                  .map((line) => (
+                    <p key={line}>{line}</p>
+                  ))}
+              </>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }

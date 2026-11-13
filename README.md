@@ -20,6 +20,7 @@ Shortcuts while editing:
 - `/?open` opens the book automatically
 - `/?open&event=2` starts on the third event
 - `/?read` opens straight into reading mode
+- `/?quality=low` (or `medium`, `high`) forces a device tier; `/?quality=flat` shows the no-WebGL fallback
 
 ## Interactions
 
@@ -58,6 +59,10 @@ Everything printed in the book lives in **`src/content/invitation.js`**:
 | --- | --- |
 | `src/components/Experience.jsx` | State: loading → intro → ready → opening → open, plus reading mode and keys |
 | `src/components/Overlay.jsx` | DOM layer: loader, button, event bar, reading controls |
+| `src/components/Stage.jsx` | Client-only 3D chunk: paints textures, creates the WebGL renderer, reports failures |
+| `src/components/FlatInvitation.jsx` | Plain HTML invitation for devices without WebGL2 (or if the GPU gives up) |
+| `src/lib/quality.js` | Device tiers (high / medium / low / flat): resolution, textures, effects, frame caps |
+| `src/components/three/Performance.jsx` | On-demand frames, shadow caching, adaptive resolution, context-loss recovery |
 | `src/components/three/Book.jsx` | Bevelled boards, hinges, ribbon + wax seal, bookmark, intro/open timelines |
 | `src/lib/invitationCard.js` | Two-sided invitation card: SDF text, theme colours, flip animation |
 | `src/components/three/EventPocket.jsx` | Pocket and cards: reveal, hover, selection frame |

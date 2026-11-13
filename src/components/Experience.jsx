@@ -1,13 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import * as THREE from 'three';
-import { Canvas } from '@react-three/fiber';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import dynamic from 'next/dynamic';
 import { couple, events, invitationHeader, ui } from '@/content/invitation';
-import { buildAssets } from '@/lib/assets';
-import { getSerifFamily, loadSerifFonts } from '@/lib/fonts';
-import Scene from './three/Scene';
+import { detectQuality } from '@/lib/quality';
 import Overlay from './Overlay';
+import FlatInvitation from './FlatInvitation';
+
+// The 3D stage (three.js, WebGL) is browser-only and heavy, so it lives in its
+// own chunk. Everything else here, the loader included, is rendered into the
+// HTML: the monogram starts drawing before any JavaScript has arrived.
+const Stage = dynamic(() => import('./Stage'), { ssr: false });
 
 function useCompact() {
   const [compact, setCompact] = useState(false);
@@ -34,49 +37,55 @@ function readUrlOptions() {
   };
 }
 
+// Device capabilities and URL options are only known in the browser. Read once,
+// through useSyncExternalStore so the server render and hydration see `null`
+// and the browser's values follow straight after.
+const NO_URL_OPTIONS = { autoOpen: false, autoRead: false, event: 0 };
+let clientInfo = null;
+const getClientInfo = () => {
+  if (!clientInfo) clientInfo = { quality: detectQuality(), url: readUrlOptions() };
+  return clientInfo;
+};
+const getServerInfo = () => null;
+const subscribeNever = () => () => {};
+
 /**
  * phase:  loading → intro → ready → opening → open
  * reading: the invitation card is lifted towards the camera for comfortable reading
+ * flat:    no usable WebGL — a plain HTML invitation replaces the 3D book
  */
 export default function Experience() {
   const compact = useCompact();
-  const [urlOptions] = useState(readUrlOptions);
-  const [assets, setAssets] = useState(null);
+  // null while rendering on the server and hydrating; the browser's values after
+  const client = useSyncExternalStore(subscribeNever, getClientInfo, getServerInfo);
+  const quality = client?.quality ?? null;
+  const urlOptions = client?.url ?? NO_URL_OPTIONS;
+  const [failed, setFailed] = useState(false);
+  const [warm, setWarm] = useState(false); // textures uploaded + shaders compiled
   const [phase, setPhase] = useState('loading');
-  const [selected, setSelected] = useState(urlOptions.event);
-  const [reading, setReading] = useState(urlOptions.autoRead);
+  const [selected, setSelected] = useState(0);
+  const [reading, setReading] = useState(false);
   const [sweep, setSweep] = useState(0);
   const [progress, setProgress] = useState(0);
+  const flat = failed || quality?.webgl === false;
 
-  // Paint all textures once fonts are ready (re-paints when content changes).
+  // apply ?event / ?read once the URL can be read (state adjusted during render)
+  const [urlApplied, setUrlApplied] = useState(false);
+  if (client && !urlApplied) {
+    setUrlApplied(true);
+    setSelected(urlOptions.event);
+    setReading(urlOptions.autoRead);
+  }
+
+  // Low-end devices also get lighter page effects (see globals.css)
   useEffect(() => {
-    let cancelled = false;
-    let built = null;
-    (async () => {
-      const family = getSerifFamily();
-      await loadSerifFonts(family);
-      if (!cancelled) setProgress(0.1);
-      const isSmall = window.matchMedia('(max-width: 700px)').matches;
-      built = await buildAssets({
-        couple,
-        events,
-        header: invitationHeader,
-        family,
-        compact: isSmall,
-        onProgress: (p) => !cancelled && setProgress(0.1 + p * 0.9),
-      });
-      if (cancelled) {
-        built.dispose();
-        return;
-      }
-      // the scene mounts behind the loader (shaders warm up); the intro starts
-      // when the loader opens onto it
-      setAssets(built);
-    })();
-    return () => {
-      cancelled = true;
-      built?.dispose();
-    };
+    if (quality) document.documentElement.dataset.quality = flat ? 'flat' : quality.tier;
+  }, [quality, flat]);
+
+  const handleWarm = useCallback(() => setWarm(true), []);
+  const handleFail = useCallback((error) => {
+    console.warn('[invitation] 3D view unavailable, showing the plain invitation instead.', error);
+    setFailed(true);
   }, []);
 
   // Each event tints the page accents (nav, buttons) with its theme.
@@ -114,6 +123,11 @@ export default function Experience() {
     setPhase((p) => (p === 'loading' ? 'intro' : p));
     setSweep((n) => n + 1);
   }, []);
+  const autoOpen = urlOptions.autoOpen;
+  const handleIntroDone = useCallback(() => {
+    setPhase((p) => (p === 'intro' ? (autoOpen ? 'opening' : 'ready') : p));
+  }, [autoOpen]);
+  const handleOpened = useCallback(() => setPhase('open'), []);
 
   // keyboard: Enter/Space opens, ←/→ browse events, Esc leaves reading mode
   useEffect(() => {
@@ -121,7 +135,10 @@ export default function Experience() {
       if (e.target instanceof HTMLElement && e.target.closest('button')) {
         if (e.key === 'Enter' || e.key === ' ') return;
       }
-      if (phase === 'ready' && (e.key === 'Enter' || e.key === ' ')) {
+      if (flat) {
+        if (e.key === 'ArrowRight') step(1);
+        else if (e.key === 'ArrowLeft') step(-1);
+      } else if (phase === 'ready' && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
         handleOpen();
       } else if (isOpen && e.key === 'ArrowRight') step(1);
@@ -131,50 +148,53 @@ export default function Experience() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, isOpen, handleOpen, step, closeRead, toggleRead]);
+  }, [flat, phase, isOpen, handleOpen, step, closeRead, toggleRead]);
 
   const framing = phase === 'opening' || isOpen ? (reading ? 'read' : 'spread') : 'closed';
 
   return (
     <main className="experience">
-      <div className="experience__canvas" aria-hidden="true">
-        <Canvas
-          shadows="percentage"
-          dpr={[1, 2]}
-          camera={{ fov: 30, near: 0.1, far: 120, position: [2.6, -7.4, 3.8], up: [0, 0, 1] }}
-          gl={{ antialias: true, toneMapping: THREE.NeutralToneMapping, toneMappingExposure: 1.0, localClippingEnabled: true }}
-        >
-          {assets && (
-            <Scene
-              assets={assets}
+      {flat ? (
+        <FlatInvitation couple={couple} header={invitationHeader} events={events} selected={selected} onSelect={setSelected} />
+      ) : (
+        <div className="experience__canvas" aria-hidden="true">
+          {quality && (
+            <Stage
+              quality={quality}
+              couple={couple}
               events={events}
+              header={invitationHeader}
+              warm={warm}
+              onProgress={setProgress}
+              onFail={handleFail}
               phase={phase}
               selected={selected}
               framing={framing}
               reading={reading && isOpen}
-              compact={compact}
               sweep={sweep}
+              onWarm={handleWarm}
               onSelect={handleSelect}
               onRequestOpen={handleOpen}
               onToggleRead={toggleRead}
               onHoverBook={triggerSweep}
-              onIntroDone={() => setPhase((p) => (p === 'intro' ? (urlOptions.autoOpen ? 'opening' : 'ready') : p))}
-              onOpened={() => setPhase('open')}
+              onIntroDone={handleIntroDone}
+              onOpened={handleOpened}
             />
           )}
-        </Canvas>
-      </div>
+        </div>
+      )}
 
       <Overlay
         ui={ui}
         couple={couple}
         events={events}
         phase={phase}
+        flat={flat}
         compact={compact}
         selected={selected}
         reading={reading && isOpen}
-        progress={progress}
-        assetsReady={Boolean(assets)}
+        progress={flat ? 1 : progress}
+        assetsReady={flat || warm}
         onReveal={handleRevealed}
         onOpen={handleOpen}
         onSelect={handleSelect}
