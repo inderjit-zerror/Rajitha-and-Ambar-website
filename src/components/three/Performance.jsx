@@ -4,7 +4,7 @@
 import { useEffect, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { getFrameCap, getShadowRefreshToken, isActive, keepAlive, requestShadowRefresh, setFrameCap } from '@/lib/activity';
-import { applyStudioEnvironment } from '@/lib/environment';
+import { applyStudioEnvironment, environmentReady } from '@/lib/environment';
 
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
 
@@ -137,7 +137,9 @@ export function AdaptiveResolution({ min, max }) {
 
 /**
  * Builds the reflection environment once (and again after a lost WebGL
- * context is restored: it lives only on the GPU).
+ * context is restored: it lives only on the GPU). It doesn't depend on the
+ * textures, so Stage mounts it with the canvas and it gets built while the
+ * textures are still being painted.
  */
 export function StudioEnvironment({ intensity = 0.6 }) {
   const gl = useThree((s) => s.gl);
@@ -203,6 +205,8 @@ export function ContextGuard({ onGiveUp, timeout = 5000 }) {
 /**
  * Before the scene is revealed: upload textures a few per frame and compile
  * shaders in the background, so the first frames don't freeze the page.
+ * Shaders are compiled once the environment is in place, since it changes
+ * them.
  */
 export function Warmup({ textures, onReady }) {
   const gl = useThree((s) => s.gl);
@@ -216,6 +220,8 @@ export function Warmup({ textures, onReady }) {
         if (i % 2 === 1) await nextFrame();
         if (cancelled) return;
       }
+      await environmentReady(scene);
+      if (cancelled) return;
       try {
         await gl.compileAsync(scene, camera);
       } catch {

@@ -10,7 +10,7 @@ import { PRESETS } from '@/lib/quality';
 import Book from './Book';
 import CameraRig from './CameraRig';
 import Dust from './Dust';
-import { AdaptiveResolution, ContextGuard, FrameDriver, ShadowCache, StudioEnvironment, Warmup } from './Performance';
+import { AdaptiveResolution, ContextGuard, FrameDriver, ShadowCache, Warmup } from './Performance';
 
 /** A warm light that glides across the cover so the foil and seal glint. */
 function SweepLight({ trigger, phase }) {
@@ -86,7 +86,12 @@ export default function Scene({
 }) {
   // continuous frames only while something always moves (idle hover, dust);
   // otherwise frames are drawn on demand
-  const continuous = phase === 'intro' || phase === 'ready' || quality.dust > 0;
+  const hovering = phase === 'intro' || phase === 'ready';
+  const continuous = hovering || quality.dust > 0;
+  // Once the book is open, only the slow dust motes keep moving when nobody
+  // interacts: 30 fps is plenty for them and halves the GPU work while idle.
+  // (Anything that animates still runs at activeFps.)
+  const idleFps = hovering ? quality.idleFps : Math.min(quality.idleFps, 30);
 
   return (
     <>
@@ -112,7 +117,7 @@ export default function Scene({
         shadow-camera-far={22}
       />
       {quality.sweepLight && <SweepLight trigger={sweep} phase={phase} />}
-      <StudioEnvironment intensity={0.6} />
+      {/* reflections: <StudioEnvironment> is mounted by Stage, with the canvas */}
 
       {/* The table the book rests on */}
       <mesh position={[0, 0, -BOOK.T - 0.002]} receiveShadow>
@@ -140,7 +145,7 @@ export default function Scene({
 
       <CameraRig framing={framing} phase={phase} />
 
-      <FrameDriver continuous={continuous} activeFps={quality.activeFps} idleFps={quality.idleFps} />
+      <FrameDriver continuous={continuous} activeFps={quality.activeFps} idleFps={idleFps} />
       <ContextGuard onGiveUp={onFail} />
       <ShadowCache />
       <AdaptiveResolution min={quality.dpr[0]} max={quality.dpr[1]} />

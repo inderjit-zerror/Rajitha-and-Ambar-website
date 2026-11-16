@@ -3,7 +3,9 @@
 //    used for the DOM and for the painted textures (cover, card tabs).
 //  • 3D text: the same family as .woff files in /public/fonts, rendered as crisp
 //    SDF text (troika-three-text) on the invitation card.
-import { preloadFont } from 'troika-three-text';
+//
+// No three.js / troika imports here: this module is part of the first-load
+// bundle (troika's glyph warm-up lives in ./invitationCard.js).
 
 const FALLBACK = "'Cormorant Garamond', 'Times New Roman', serif";
 
@@ -35,13 +37,4 @@ export function sdfFont(weight = 500, style = 'normal') {
   const w = weight >= 650 ? 700 : weight >= 550 ? 600 : 500;
   const key = `${style === 'italic' ? Math.min(w, 600) : w}-${style}`;
   return SDF_FONTS[key] || SDF_FONTS['500-normal'];
-}
-
-/** Warm up troika's glyph atlas so text never pops in late. */
-export function preloadSdfFonts(characters) {
-  const timeout = new Promise((resolve) => setTimeout(resolve, 6000));
-  const all = Object.values(SDF_FONTS).map(
-    (font) => new Promise((resolve) => preloadFont({ font, characters }, () => resolve()))
-  );
-  return Promise.race([Promise.all(all), timeout]);
 }

@@ -6,7 +6,7 @@
 // colours), lands it, and writes the text in line by line.
 import * as THREE from 'three';
 import gsap from 'gsap';
-import { Text } from 'troika-three-text';
+import { Text, preloadFont } from 'troika-three-text';
 import { DETAIL_CARD } from './constants';
 import { sdfFont } from './fonts';
 import { settle } from './activity';
@@ -15,6 +15,18 @@ const W = DETAIL_CARD.W;
 const H = DETAIL_CARD.H;
 const DEPTH = 0.008;
 const FLIP_CLEARANCE = (W / 2) * 0.97 + 0.32; // keeps the card above the page while edge-on
+
+/**
+ * Warm up troika's glyph atlas so text never pops in late.
+ * charactersByFont: Map of font URL → characters (see charactersByFont in layout.js)
+ */
+export function preloadSdfFonts(charactersByFont) {
+  const timeout = new Promise((resolve) => setTimeout(resolve, 6000));
+  const all = [...charactersByFont].map(
+    ([font, characters]) => new Promise((resolve) => preloadFont({ font, characters }, () => resolve()))
+  );
+  return Promise.race([Promise.all(all), timeout]);
+}
 
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 const smooth = (t) => t * t * (3 - 2 * t);

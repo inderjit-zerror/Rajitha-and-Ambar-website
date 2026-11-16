@@ -2,11 +2,12 @@
 // card centre, y up). Line breaks are measured with canvas using the same font
 // as the 3D SDF text, so the layout is deterministic and auto-fits the card.
 import { createCanvas, wrapText } from './paint/utils';
+import { sdfFont } from './fonts';
 
 const PX = 200; // measuring resolution (px per world unit)
 
-export function layoutInvitation({ event, header, family, width, height }) {
-  const { ctx } = createCanvas(8, 8);
+/** What is printed on an event's invitation card, top to bottom. */
+function invitationBlocks(event, header) {
   const d = event.detail || {};
   const blocks = [];
   const text = (value, opts) => {
@@ -41,7 +42,12 @@ export function layoutInvitation({ event, header, family, width, height }) {
   if (d.dressCode || d.note) gap(0.014);
   text(d.dressCode, { size: 0.028, weight: 600, style: 'italic', role: 'ink', lh: 1.3 });
   text(d.note, { size: 0.027, weight: 500, style: 'italic', role: 'soft', lh: 1.3 });
+  return blocks;
+}
 
+export function layoutInvitation({ event, header, family, width, height }) {
+  const { ctx } = createCanvas(8, 8);
+  const blocks = invitationBlocks(event, header);
   const maxWidth = width * 0.84;
   const measure = (scale) => {
     let total = 0;
@@ -95,15 +101,20 @@ export function layoutInvitation({ event, header, family, width, height }) {
   return items;
 }
 
-/** Every character used on the cards (for glyph preloading). */
-export function collectCharacters(events, header) {
-  const set = new Set();
-  const add = (v) => [...String(v || '')].forEach((c) => set.add(c));
-  Object.values(header).forEach(add);
-  events.forEach((e) => {
-    add(e.title);
-    add(String(e.title || '').toUpperCase());
-    Object.values(e.detail || {}).forEach(add);
+/**
+ * The characters each SDF font prints on the cards (font URL → string), for
+ * glyph preloading: only the glyphs that are really used, and no font that
+ * isn't.
+ */
+export function charactersByFont(events, header) {
+  const sets = new Map();
+  events.forEach((event) => {
+    invitationBlocks(event, header).forEach((block) => {
+      if (block.kind !== 'text') return;
+      const font = sdfFont(block.weight, block.style);
+      if (!sets.has(font)) sets.set(font, new Set());
+      for (const c of block.text) if (c.trim()) sets.get(font).add(c);
+    });
   });
-  return [...set].join('');
+  return new Map([...sets].map(([font, chars]) => [font, [...chars].join('')]));
 }

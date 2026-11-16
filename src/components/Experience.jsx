@@ -4,13 +4,30 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { couple, events, invitationHeader, ui } from '@/content/invitation';
 import { detectQuality } from '@/lib/quality';
+import { getSerifFamily, loadSerifFonts } from '@/lib/fonts';
 import Overlay from './Overlay';
 import FlatInvitation from './FlatInvitation';
 
 // The 3D stage (three.js, WebGL) is browser-only and heavy, so it lives in its
 // own chunk. Everything else here, the loader included, is rendered into the
 // HTML: the monogram starts drawing before any JavaScript has arrived.
-const Stage = dynamic(() => import('./Stage'), { ssr: false });
+const loadStage = () => import('./StagePreload');
+const Stage = dynamic(() => loadStage().then((m) => m.Stage), { ssr: false });
+// Renders nothing; on the server it puts preload hints for that chunk in the HTML.
+const StagePreload = dynamic(() => import('./StagePreload'), { loading: () => null });
+
+// The procedural texture painter: its own small chunk (no three.js), so the
+// textures can be painted while the 3D chunk is still downloading.
+const loadPainter = () => import('@/lib/paint');
+
+// Don't wait for hydration and <Stage> to render: as soon as this module runs
+// in the browser, start fetching the painter (and the 3D chunk, if the
+// preload hint hasn't already). Skipped without WebGL2: those devices get the
+// plain invitation and need neither.
+if (typeof window !== 'undefined' && 'WebGL2RenderingContext' in window && !/[?&]quality=flat\b/.test(window.location.search)) {
+  loadStage().catch(() => {});
+  loadPainter().catch(() => {});
+}
 
 function useCompact() {
   const [compact, setCompact] = useState(false);
@@ -66,7 +83,9 @@ export default function Experience() {
   const [selected, setSelected] = useState(0);
   const [reading, setReading] = useState(false);
   const [sweep, setSweep] = useState(0);
-  const [progress, setProgress] = useState(0);
+  const [painted, setPainted] = useState(null); // canvases for every texture
+  const [paintProgress, setPaintProgress] = useState(0);
+  const [stageProgress, setStageProgress] = useState(0);
   const flat = failed || quality?.webgl === false;
 
   // apply ?event / ?read once the URL can be read (state adjusted during render)
@@ -87,6 +106,32 @@ export default function Experience() {
     console.warn('[invitation] 3D view unavailable, showing the plain invitation instead.', error);
     setFailed(true);
   }, []);
+
+  // Paint the textures (on canvases) while the 3D chunk is still downloading.
+  useEffect(() => {
+    if (!quality || flat) return undefined;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const family = getSerifFamily();
+        await loadSerifFonts(family);
+        const { paintAssets } = await loadPainter();
+        const result = await paintAssets({
+          couple,
+          events,
+          header: invitationHeader,
+          family,
+          quality,
+          onProgress: setPaintProgress,
+          signal: controller.signal,
+        });
+        setPainted(result);
+      } catch (error) {
+        if (!controller.signal.aborted) handleFail(error);
+      }
+    })();
+    return () => controller.abort();
+  }, [quality, flat, handleFail]);
 
   // Each event tints the page accents (nav, buttons) with its theme.
   useEffect(() => {
@@ -154,6 +199,7 @@ export default function Experience() {
 
   return (
     <main className="experience">
+      <StagePreload />
       {flat ? (
         <FlatInvitation couple={couple} header={invitationHeader} events={events} selected={selected} onSelect={setSelected} />
       ) : (
@@ -161,11 +207,11 @@ export default function Experience() {
           {quality && (
             <Stage
               quality={quality}
-              couple={couple}
               events={events}
               header={invitationHeader}
+              painted={painted}
               warm={warm}
-              onProgress={setProgress}
+              onProgress={setStageProgress}
               onFail={handleFail}
               phase={phase}
               selected={selected}
@@ -193,7 +239,7 @@ export default function Experience() {
         compact={compact}
         selected={selected}
         reading={reading && isOpen}
-        progress={flat ? 1 : progress}
+        progress={flat ? 1 : paintProgress * 0.7 + stageProgress * 0.3}
         assetsReady={flat || warm}
         onReveal={handleRevealed}
         onOpen={handleOpen}
